@@ -1,0 +1,5 @@
+{
+  "name": "ClimaViz",
+  "description": "Weather data visualization tool with interactive sun path and 12x24 hourly plots.",
+  "requestFramePermissions": []
+}
