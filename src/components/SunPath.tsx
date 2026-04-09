@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import Slider from 'rc-slider';
+import 'rc-slider/assets/index.css';
 import SunCalc from 'suncalc';
 import { EPWDataRow, EPWMetadata, EPWVariable } from '../lib/epwParser';
 import { InteractiveLegend, GradientDef } from './InteractiveLegend';
@@ -16,19 +18,45 @@ interface SunPathProps {
   gradients: GradientDef[];
   filter: GlobalFilterState;
   unitSystem: UnitSystem;
+  heatmapTextColor: string;
+  theme: 'light' | 'dark';
+  setShowGradientModal: (show: boolean) => void;
 }
 
-export function SunPath({ metadata, data, variables, onRemove, gradients, filter, unitSystem }: SunPathProps) {
+export function SunPath({ 
+  metadata, data, variables, onRemove, gradients, filter, unitSystem, heatmapTextColor, theme, 
+  setShowGradientModal
+}: SunPathProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [aggregation, setAggregation] = useState<'hour' | 'day' | 'week' | 'month'>('week');
   const [colorVar, setColorVar] = useState(variables[0]?.id || '');
   const [radiusVar, setRadiusVar] = useState(variables.find(v => v.id === 'globalHorizontalRadiation')?.id || variables[0]?.id || '');
   const [gradientId, setGradientId] = useState(gradients[0].id);
-  const [radiusMin, setRadiusMin] = useState<number | string>(5);
-  const [radiusMax, setRadiusMax] = useState<number | string>(25);
-  const [aspectRatio, setAspectRatio] = useState('1/1');
+  const [radiusMin, setRadiusMin] = useState<number | string>(2);
+  const [radiusMax, setRadiusMax] = useState<number | string>(10);
   const [showSettings, setShowSettings] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  const outerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 400 });
+
+  useEffect(() => {
+    if (!outerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        const newWidth = Math.round(entry.contentRect.width);
+        setDimensions(prev => {
+          if (prev.width === newWidth) return prev;
+          return { width: newWidth };
+        });
+      }
+    });
+    observer.observe(outerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = dimensions.width / 400;
 
   // Group variables by category
   const groupedVariables = variables.reduce((acc, variable) => {
@@ -83,12 +111,12 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
   const cUnit = convertUnit(colorVarDef.unit);
 
   useEffect(() => {
-    if (!svgRef.current || !data.length) return;
+    if (!svgRef.current || !data.length || dimensions.width === 0) return;
 
-    const width = 900;
-    const [aspectW, aspectH] = aspectRatio.split('/').map(Number);
-    const height = width * (aspectH / aspectW);
-    const margin = 40;
+    const BASE_WIDTH = 400;
+    const width = BASE_WIDTH;
+    const height = 500;
+    const margin = 30;
     const radius = Math.min(width, height) / 2 - margin;
 
     const svg = d3.select(svgRef.current);
@@ -167,7 +195,7 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
     const radiusVarDef = variables.find(v => v.id === radiusVar) || variables[0];
     const pointRadiusScale = d3.scaleLinear()
       .domain([radiusVarDef.min, radiusVarDef.max])
-      .range([rMin, rMax])
+      .range([rMin as number, rMax as number])
       .clamp(true);
 
     // Sort points so larger circles are drawn first (at the bottom)
@@ -210,8 +238,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
       .attr("class", "altitude-circle")
       .attr("r", d => rScale(d))
       .style("fill", "none")
-      .style("stroke", d => d === 0 ? "#1f2937" : "#e5e7eb") // Darker and thicker for horizon
-      .style("stroke-width", d => d === 0 ? "2px" : "1px");
+      .style("stroke", d => d === 0 ? (theme === 'dark' ? '#4b5563' : '#1f2937') : (theme === 'dark' ? '#374151' : '#e5e7eb'))
+      .style("stroke-width", d => d === 0 ? '2px' : '1px');
 
     // Altitude labels
     g.selectAll(".altitude-label")
@@ -221,8 +249,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
       .attr("y", d => -rScale(d))
       .attr("dy", "0.35em")
       .attr("text-anchor", "middle")
-      .style("fill", "#6b7280")
-      .style("font-size", "14px")
+      .style("fill", heatmapTextColor)
+      .style("font-size", `10px`)
       .style("font-weight", "500")
       .text(d => `${d}°`);
 
@@ -235,8 +263,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
       .attr("y1", 0)
       .attr("x2", d => rScale(0) * Math.sin(aScale(d)))
       .attr("y2", d => -rScale(0) * Math.cos(aScale(d)))
-      .style("stroke", "#e5e7eb")
-      .style("stroke-width", "1px");
+      .style("stroke", theme === 'dark' ? '#374151' : '#e5e7eb')
+      .style("stroke-width", '1px');
 
     // Azimuth labels
     const compass = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
@@ -248,9 +276,9 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
       .attr("y", d => -(rScale(0) + 30) * Math.cos(aScale(d)))
       .attr("dy", "0.35em")
       .attr("text-anchor", "middle")
-      .style("fill", "#4b5563")
+      .style("fill", heatmapTextColor)
       .style("font-weight", "bold")
-      .style("font-size", d => compass[d as keyof typeof compass] ? "22px" : "16px")
+      .style("font-size", d => compass[d as keyof typeof compass] ? `16px` : `12px`)
       .text(d => compass[d as keyof typeof compass] || `${d}°`);
 
     // 3. Draw Sun Path Lines (Solstices and Equinoxes)
@@ -287,8 +315,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
           .datum(pathPoints)
           .attr("d", lineGenerator)
           .style("fill", "none")
-          .style("stroke", "#4b5563") // Darker grey for sun paths
-          .style("stroke-width", "3px")
+          .style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563')
+          .style("stroke-width", '3px')
           .style("opacity", 0.8)
           .style("pointer-events", "none");
           
@@ -299,8 +327,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
             .attr("x", rScale(highestPoint.altitude) * Math.sin(aScale(highestPoint.azimuth)))
             .attr("y", -rScale(highestPoint.altitude) * Math.cos(aScale(highestPoint.azimuth)) - 10)
             .attr("text-anchor", "middle")
-            .style("fill", "#1f2937")
-            .style("font-size", "11px")
+            .style("fill", heatmapTextColor)
+            .style("font-size", `9px`)
             .style("font-weight", "bold")
             .style("pointer-events", "none")
             .text(kd.name);
@@ -315,8 +343,8 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
       .attr("class", "data-point-bg")
       .attr("cx", d => rScale(d.altitude) * Math.sin(aScale(d.azimuth)))
       .attr("cy", d => -rScale(d.altitude) * Math.cos(aScale(d.azimuth)))
-      .attr("r", d => pointRadiusScale(d[radiusVar] as number) + 2) // +2px for black outline
-      .style("fill", "#1f2937")
+      .attr("r", d => pointRadiusScale(d[radiusVar] as number) + 2) // +2px for outline
+      .style("fill", theme === 'dark' ? '#111827' : '#1f2937')
       .style("opacity", 0.8)
       .style("pointer-events", "none");
 
@@ -338,24 +366,38 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
         return `${prefix}${d.date.toLocaleString()}\nAlt: ${d.altitude.toFixed(1)}°\nAz: ${d.azimuth.toFixed(1)}°\n${colorVarDef.name}: ${convertValue(d[colorVar] as number, colorVarDef.unit).toFixed(1)} ${cUnit}\n${radiusVarDef.name}: ${convertValue(d[radiusVar] as number, radiusVarDef.unit).toFixed(1)} ${convertUnit(radiusVarDef.unit)}`;
       });
 
-  }, [metadata, data, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, aspectRatio, unitSystem]);
+  }, [metadata, data, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, dimensions.width, scale, unitSystem, theme, heatmapTextColor]);
 
   return (
-    <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-4 border-b border-gray-100 bg-white">
+    <div 
+      ref={outerRef}
+      className={`w-full h-fit flex flex-col relative transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}
+      style={{ fontSize: `calc(14px * ${scale})` }}
+    >
+      <div 
+        className={`flex flex-col sm:flex-row justify-between items-start sm:items-center border-b ${theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white'}`}
+        style={{ padding: `calc(16px * ${scale})`, gap: `calc(12px * ${scale})` }}
+      >
         <div className="flex items-center justify-between w-full sm:w-auto gap-3">
-          <h3 className="text-sm font-semibold text-gray-800 whitespace-nowrap">Sun Path</h3>
-          <div className="h-4 w-px bg-gray-200"></div>
-          <span className="text-sm font-medium text-gray-500 truncate max-w-[120px] sm:max-w-none">{colorVarDef.name}</span>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <h3 className={`text-xs sm:text-sm font-semibold whitespace-nowrap uppercase tracking-wider ${theme === 'dark' ? 'text-gray-200' : 'text-gray-800'}`}>Sun Path</h3>
+            <div className={`h-4 w-px shrink-0 ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-200'}`}></div>
+            <span className="text-xs sm:text-sm font-medium text-gray-500 truncate">{colorVarDef.name}</span>
+          </div>
+          {onRemove && (
+            <button onClick={onRemove} className="sm:hidden p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
         
-        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          <div className="flex bg-gray-100 p-1 rounded-lg">
+        <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2 sm:gap-3">
+          <div className="flex bg-gray-100 p-0.5 sm:p-1 rounded-lg">
             {(['hour', 'day', 'week', 'month'] as const).map(agg => (
               <button
                 key={agg}
                 onClick={() => setAggregation(agg)}
-                className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
+                className={`px-2 sm:px-3 py-1 rounded-md text-[10px] sm:text-xs font-medium capitalize transition-colors ${
                   aggregation === agg ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
@@ -363,27 +405,31 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setShowStats(!showStats)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  showStats ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'
-                }`}
-                title="Toggle Statistics"
-              >
-                Stats
-              </button>
-            </div>
+          <div className="flex items-center gap-1 sm:gap-2">
+            <button
+              onClick={() => setShowStats(!showStats)}
+              className={`px-2 sm:px-3 py-1 rounded-md text-[10px] sm:text-xs font-medium transition-colors border ${
+                showStats 
+                  ? (theme === 'dark' ? 'bg-blue-900/50 border-blue-800 text-blue-400' : 'bg-blue-50 border-blue-100 text-blue-600') 
+                  : (theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200' : 'bg-white border-gray-200 text-gray-500 hover:text-gray-700')
+              }`}
+              title="Toggle Statistics"
+            >
+              Stats
+            </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-1.5 rounded-md transition-colors ${showSettings ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+              className={`p-1.5 rounded-md transition-colors border ${
+                showSettings 
+                  ? (theme === 'dark' ? 'bg-blue-900/50 border-blue-800 text-blue-400' : 'bg-blue-50 border-blue-100 text-blue-600') 
+                  : (theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600')
+              }`}
               title="Chart Settings"
             >
               <Settings2 className="w-4 h-4" />
             </button>
             {onRemove && (
-              <button onClick={onRemove} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors ml-1">
+              <button onClick={onRemove} className={`hidden sm:block p-1.5 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/30' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}>
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -391,124 +437,139 @@ export function SunPath({ metadata, data, variables, onRemove, gradients, filter
         </div>
       </div>
 
-      {/* Stats Bar */}
+      {/* Stats Modal */}
       {showStats && (
-        <div className="px-4 py-3 bg-white border-b border-gray-50 flex flex-wrap gap-6 text-sm">
-          <div className="flex flex-col">
-            <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Average</span>
-            <span className="font-medium text-gray-900 text-base">{stats.avg.toFixed(1)} {cUnit}</span>
-          </div>
-          <div className="w-px h-8 bg-gray-100"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Min / Max</span>
-            <span className="font-medium text-gray-900 text-base">{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</span>
-          </div>
-          <div className="w-px h-8 bg-gray-100"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Total</span>
-            <span className="font-medium text-gray-900 text-base">{stats.total.toFixed(0)} {cUnit}</span>
-          </div>
-          <div className="w-px h-8 bg-gray-100"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Samples</span>
-            <span className="font-medium text-gray-900 text-base">{stats.count}</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowStats(false)}>
+          <div className={`p-6 rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto ${theme === 'dark' ? 'bg-gray-800 border border-gray-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Statistics</h3>
+              <button onClick={() => setShowStats(false)} className={`p-1 rounded-md ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
+      {/* Settings Modal */}
       {showSettings && (
-        <div className="p-4 bg-white border-b border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Color Variable</label>
-            <select
-              value={colorVar}
-              onChange={(e) => setColorVar(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-            >
-              {Object.entries(groupedVariables).map(([category, vars]) => (
-                <optgroup key={category} label={category}>
-                  {vars.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Radius Variable</label>
-            <select
-              value={radiusVar}
-              onChange={(e) => setRadiusVar(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-            >
-              {Object.entries(groupedVariables).map(([category, vars]) => (
-                <optgroup key={category} label={category}>
-                  {vars.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Aspect Ratio</label>
-            <select
-              value={aspectRatio}
-              onChange={(e) => setAspectRatio(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-            >
-              <option value="1/1">1:1 (Square)</option>
-              <option value="4/3">4:3 (Standard)</option>
-              <option value="3/2">3:2 (Classic)</option>
-              <option value="2/3">2:3 (Tall)</option>
-              <option value="2/1">2:1 (Wide)</option>
-              <option value="3/1">3:1 (Ultrawide)</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Radius Min/Max</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={radiusMin}
-                onChange={(e) => setRadiusMin(e.target.value)}
-                className="w-1/2 bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-                placeholder="Min"
-              />
-              <input
-                type="number"
-                value={radiusMax}
-                onChange={(e) => setRadiusMax(e.target.value)}
-                className="w-1/2 bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-                placeholder="Max"
-              />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettings(false)}>
+          <div className={`p-6 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto ${theme === 'dark' ? 'bg-gray-800 border border-gray-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Chart Settings</h3>
+              <button onClick={() => setShowSettings(false)} className={`p-1 rounded-md ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}>
+                <X className="w-5 h-5" />
+              </button>
             </div>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Color Palette</label>
-            <div className="flex bg-gray-50 border border-gray-200 p-1.5 rounded-lg overflow-x-auto">
-              {gradients.map(g => (
-                <button
-                  key={g.id}
-                  onClick={() => setGradientId(g.id)}
-                  className={`flex-shrink-0 w-8 h-8 rounded-md mx-1 border-2 transition-all ${
-                    gradientId === g.id ? 'border-blue-500 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
-                  }`}
-                  style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
-                  title={g.name}
-                />
-              ))}
+            <div className="grid grid-cols-1 gap-6">
+              <div className="space-y-2">
+                <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Variable</label>
+                <select
+                  value={colorVar}
+                  onChange={(e) => setColorVar(e.target.value)}
+                  className={`w-full text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                >
+                  {Object.entries(groupedVariables).map(([category, vars]) => (
+                    <optgroup key={category} label={category}>
+                      {vars.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Radius Variable</label>
+                <select
+                  value={radiusVar}
+                  onChange={(e) => setRadiusVar(e.target.value)}
+                  className={`w-full text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                >
+                  {Object.entries(groupedVariables).map(([category, vars]) => (
+                    <optgroup key={category} label={category}>
+                      {vars.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Radius Min/Max</label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={radiusMin}
+                    onChange={(e) => setRadiusMin(e.target.value)}
+                    className={`w-1/2 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                    placeholder="Min"
+                  />
+                  <input
+                    type="number"
+                    value={radiusMax}
+                    onChange={(e) => setRadiusMax(e.target.value)}
+                    className={`w-1/2 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                    placeholder="Max"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
+                  <button 
+                    onClick={() => setShowGradientModal(true)}
+                    className="text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-tight"
+                  >
+                    + Create
+                  </button>
+                </div>
+                <div className={`flex p-1.5 rounded-lg overflow-x-auto border ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+                  {gradients.map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => setGradientId(g.id)}
+                      className={`flex-shrink-0 w-8 h-8 rounded-md mx-1 border-2 transition-all ${
+                        gradientId === g.id ? 'border-blue-500 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                      }`}
+                      style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
+                      title={g.name}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="p-4 flex-1 flex flex-col">
-        <div className="w-full flex items-center justify-center" style={{ aspectRatio: aspectRatio }}>
+      <div style={{ padding: `calc(16px * ${scale})` }} className="flex-1 flex flex-col">
+        <div 
+          className="w-full flex items-center justify-center" 
+          ref={containerRef}
+          style={{ height: `calc(500px * ${scale})` }}
+        >
           <svg ref={svgRef} className="w-full h-full max-h-full" />
         </div>
-        <div className="mt-4">
-          <InteractiveLegend variable={colorVarDef} gradientId={gradientId} setGradientId={setGradientId} gradients={gradients} />
+        <div style={{ marginTop: `calc(16px * ${scale})` }} className="flex-shrink-0">
+          <InteractiveLegend variable={colorVarDef} gradientId={gradientId} setGradientId={setGradientId} gradients={gradients} theme={theme} fontScale={scale} />
         </div>
       </div>
     </div>

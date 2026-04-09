@@ -3,16 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { MapSelector } from './components/MapSelector';
 import { SunPath } from './components/SunPath';
 import { DataExplorer } from './components/DataExplorer';
 import { WindExplorer } from './components/WindExplorer';
 import { UtciExplorer } from './components/UtciExplorer';
-import { GlobalFilterPanel, GlobalFilterState } from './components/GlobalFilterPanel';
+import { GlobalFilterState } from './components/GlobalFilterPanel';
+import { SettingsModal } from './components/SettingsModal';
 import { SummaryStats } from './components/SummaryStats';
 import { ParsedEPW } from './lib/epwParser';
-import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Palette } from 'lucide-react';
+import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Activity, Settings2 } from 'lucide-react';
 import { GRADIENTS } from './lib/constants';
 import { GradientDef } from './components/InteractiveLegend';
 
@@ -38,6 +39,10 @@ export default function App() {
   const [newGradientName, setNewGradientName] = useState('');
   const [newGradientColors, setNewGradientColors] = useState<string[]>(['#ff0000', '#0000ff']);
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
+  const [heatmapTextColor, setHeatmapTextColor] = useState<string>('#000000');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [showSummaryStats, setShowSummaryStats] = useState(false);
+  const summaryStatsRef = useRef<HTMLDivElement>(null);
   
   const [globalFilter, setGlobalFilter] = useState<GlobalFilterState>({
     startMonth: 1,
@@ -46,7 +51,19 @@ export default function App() {
     endHour: 23
   });
 
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
   const allGradients = [...GRADIENTS, ...customGradients];
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (summaryStatsRef.current && !summaryStatsRef.current.contains(event.target as Node)) {
+        setShowSummaryStats(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleAddGradient = () => {
     if (newGradientName && newGradientColors.length >= 2) {
@@ -66,11 +83,29 @@ export default function App() {
   };
 
   const addChart = (type: ChartType) => {
-    setActiveCharts(prev => [...prev, { id: `${type}-${Date.now()}`, type }]);
+    const newId = `${type}-${Date.now()}`;
+    setActiveCharts(prev => [...prev, { id: newId, type }]);
+    setLayouts(prev => {
+      const newLayouts = { ...prev };
+      Object.keys(newLayouts).forEach(key => {
+        const layout = newLayouts[key] || [];
+        const maxY = Math.max(0, ...layout.map(l => l.y + l.h));
+        const w = key === 'lg' ? 6 : 12;
+        newLayouts[key] = [...layout, { i: newId, x: 0, y: maxY, w, h: 5, minW: 4, minH: 4 }];
+      });
+      return newLayouts;
+    });
   };
 
   const removeChart = (id: string) => {
     setActiveCharts(prev => prev.filter(chart => chart.id !== id));
+    setLayouts(prev => {
+      const newLayouts = { ...prev };
+      Object.keys(newLayouts).forEach(key => {
+        newLayouts[key] = newLayouts[key].filter(l => l.i !== id);
+      });
+      return newLayouts;
+    });
   };
 
   if (!epwData) {
@@ -82,82 +117,53 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gray-50 flex flex-col font-sans">
+    <div className={`h-screen w-screen overflow-hidden flex flex-col font-sans transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-[#f2f2f2] text-gray-900'}`}>
       {/* Top Navigation Bar */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 z-20 flex-shrink-0 shadow-sm">
+      <div className={`${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 z-20 flex-shrink-0 shadow-sm transition-colors duration-300`}>
         <div className="flex items-center gap-4 w-full sm:w-auto">
           <button 
             onClick={() => setEpwData(null)}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600 border border-transparent hover:border-gray-200"
+            className={`p-2 rounded-full transition-colors border border-transparent ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-300 hover:border-gray-600' : 'hover:bg-gray-100 text-gray-600 hover:border-gray-200'}`}
             title="Back to Map"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200 flex-1 sm:flex-none">
-            <MapPin className="w-4 h-4 text-gray-500 flex-shrink-0" />
-            <span className="text-sm font-medium text-gray-700 truncate max-w-[200px] sm:max-w-md">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border flex-1 sm:flex-none ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+            <MapPin className={`w-4 h-4 flex-shrink-0 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} />
+            <span className={`text-sm font-medium truncate max-w-[200px] sm:max-w-md ${theme === 'dark' ? 'text-gray-200' : 'text-gray-700'}`}>
               {epwData.metadata.city}, {epwData.metadata.country}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0 hide-scrollbar">
-          <div className="flex items-center bg-gray-100 p-1 rounded-lg mr-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap pb-2 sm:pb-0">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border active:scale-95 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+            title="Global Settings"
+          >
+            <Settings2 className="w-4 h-4 text-gray-500" />
+            <span className="inline">Settings</span>
+          </button>
+          
+          <div className={`h-6 w-px mx-1 hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
+          
+          <div className="relative" ref={summaryStatsRef}>
             <button
-              onClick={() => setUnitSystem('metric')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${unitSystem === 'metric' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setShowSummaryStats(!showSummaryStats)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border active:scale-95 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap ${showSummaryStats ? (theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-100 border-gray-300 text-gray-900') : (theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50')}`}
+              title="Overall Averages"
             >
-              Metric
+              <Activity className="w-4 h-4 text-blue-500" />
+              <span className="inline">Averages</span>
             </button>
-            <button
-              onClick={() => setUnitSystem('imperial')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${unitSystem === 'imperial' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              Imperial
-            </button>
+
+            {showSummaryStats && (
+              <div className={`absolute right-0 sm:right-0 mt-2 w-screen max-w-[calc(100vw-2rem)] sm:w-[800px] rounded-xl shadow-xl border z-50 overflow-hidden ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`} style={{ right: 'auto', left: '50%', transform: 'translateX(-50%)', marginLeft: '0' }}>
+                <SummaryStats data={epwData.data} variables={epwData.variables} filter={globalFilter} unitSystem={unitSystem} theme={theme} />
+              </div>
+            )}
           </div>
-          <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
-          <button
-            onClick={() => addChart('sunpath')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 text-gray-700 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap"
-            title="Add Sun Path"
-          >
-            <Sun className="w-4 h-4 text-amber-500" />
-            <span className="inline">Sun Path</span>
-          </button>
-          <button
-            onClick={() => addChart('explorer')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 text-gray-700 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap"
-            title="Add Data Explorer"
-          >
-            <BarChart2 className="w-4 h-4 text-blue-500" />
-            <span className="inline">Data Explorer</span>
-          </button>
-          <button
-            onClick={() => addChart('wind')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 text-gray-700 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap"
-            title="Add Wind Explorer"
-          >
-            <Wind className="w-4 h-4 text-teal-500" />
-            <span className="inline">Wind</span>
-          </button>
-          <button
-            onClick={() => addChart('utci')}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 text-gray-700 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap"
-            title="Add UTCI Comfort"
-          >
-            <ThermometerSun className="w-4 h-4 text-orange-500" />
-            <span className="inline">UTCI</span>
-          </button>
-          <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
-          <button
-            onClick={() => setShowGradientModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 active:bg-gray-100 active:scale-95 text-gray-700 rounded-lg text-sm font-medium transition-all shadow-sm whitespace-nowrap"
-            title="Create Custom Gradient"
-          >
-            <Palette className="w-4 h-4 text-purple-500" />
-            <span className="inline">New Gradient</span>
-          </button>
         </div>
       </div>
 
@@ -240,74 +246,165 @@ export default function App() {
         </div>
       )}
 
-      {/* Global Filter Panel */}
-      <GlobalFilterPanel filter={globalFilter} onChange={setGlobalFilter} />
-      
-      {/* Summary Stats */}
-      <SummaryStats data={epwData.data} variables={epwData.variables} filter={globalFilter} unitSystem={unitSystem} />
-
       {/* Dashboard Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-        {activeCharts.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-gray-400">
-            <div className="w-24 h-24 mb-6 rounded-full bg-gray-100 flex items-center justify-center">
-              <Plus className="w-10 h-10 text-gray-300" />
+      <div className="flex-1 overflow-y-auto relative">
+        <div className="max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8">
+          {showSettingsModal && (
+            <SettingsModal
+              onClose={() => setShowSettingsModal(false)}
+              filter={globalFilter}
+              onChangeFilter={setGlobalFilter}
+              theme={theme}
+              setTheme={setTheme}
+              unitSystem={unitSystem}
+              setUnitSystem={setUnitSystem}
+              heatmapTextColor={heatmapTextColor}
+              setHeatmapTextColor={setHeatmapTextColor}
+              setShowGradientModal={setShowGradientModal}
+            />
+          )}
+
+          {activeCharts.length === 0 ? (
+            <div className="py-20 flex flex-col items-center justify-center text-gray-400">
+              <div className="w-24 h-24 mb-6 rounded-full bg-gray-100 flex items-center justify-center">
+                <Plus className="w-10 h-10 text-gray-300" />
+              </div>
+              <h3 className="text-xl font-medium text-gray-600 mb-2">Your Dashboard is Empty</h3>
+              <p className="text-sm max-w-md text-center">
+                Add widgets below to start exploring the climate data for {epwData.metadata.city}.
+              </p>
             </div>
-            <h3 className="text-xl font-medium text-gray-600 mb-2">Your Dashboard is Empty</h3>
-            <p className="text-sm max-w-md text-center">
-              Add widgets from the top menu to start exploring the climate data for {epwData.metadata.city}.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-            {activeCharts.map(chart => (
-              <div key={chart.id} className="w-full flex justify-center">
-                <div className="w-full max-w-4xl">
-                  {chart.type === 'sunpath' && (
-                    <SunPath
-                      metadata={epwData.metadata}
-                      data={epwData.data}
-                      variables={epwData.variables}
-                      onRemove={() => removeChart(chart.id)}
-                      gradients={allGradients}
-                      filter={globalFilter}
-                      unitSystem={unitSystem}
-                    />
-                  )}
-                  {chart.type === 'explorer' && (
-                    <DataExplorer
-                      data={epwData.data}
-                      variables={epwData.variables}
-                      onRemove={() => removeChart(chart.id)}
-                      gradients={allGradients}
-                      filter={globalFilter}
-                      unitSystem={unitSystem}
-                    />
-                  )}
-                  {chart.type === 'wind' && (
-                    <WindExplorer
-                      data={epwData.data}
-                      variables={epwData.variables}
-                      onRemove={() => removeChart(chart.id)}
-                      gradients={allGradients}
-                      filter={globalFilter}
-                      unitSystem={unitSystem}
-                    />
-                  )}
-                  {chart.type === 'utci' && (
-                    <UtciExplorer
-                      data={epwData.data}
-                      onRemove={() => removeChart(chart.id)}
-                      gradients={allGradients}
-                      filter={globalFilter}
-                      unitSystem={unitSystem}
-                    />
-                  )}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+              {activeCharts.map(chart => (
+                <div key={chart.id} className={`w-full h-fit flex flex-col bg-white dark:bg-gray-800 rounded-xl border transition-all ${theme === 'dark' ? 'border-gray-700 shadow-sm' : 'border-gray-200 shadow-[5px_5px_0px_0px_#d9d9d9]'} overflow-hidden`}>
+                  <div className="flex-1">
+                    {chart.type === 'sunpath' && (
+                      <SunPath
+                        metadata={epwData.metadata}
+                        data={epwData.data}
+                        variables={epwData.variables}
+                        onRemove={() => removeChart(chart.id)}
+                        gradients={allGradients}
+                        filter={globalFilter}
+                        unitSystem={unitSystem}
+                        heatmapTextColor={heatmapTextColor}
+                        theme={theme}
+                        setShowGradientModal={setShowGradientModal}
+                      />
+                    )}
+                    {chart.type === 'explorer' && (
+                      <DataExplorer
+                        data={epwData.data}
+                        variables={epwData.variables}
+                        onRemove={() => removeChart(chart.id)}
+                        gradients={allGradients}
+                        filter={globalFilter}
+                        unitSystem={unitSystem}
+                        heatmapTextColor={heatmapTextColor}
+                        theme={theme}
+                        setShowGradientModal={setShowGradientModal}
+                      />
+                    )}
+                    {chart.type === 'wind' && (
+                      <WindExplorer
+                        data={epwData.data}
+                        variables={epwData.variables}
+                        onRemove={() => removeChart(chart.id)}
+                        gradients={allGradients}
+                        filter={globalFilter}
+                        unitSystem={unitSystem}
+                        heatmapTextColor={heatmapTextColor}
+                        theme={theme}
+                        setShowGradientModal={setShowGradientModal}
+                      />
+                    )}
+                    {chart.type === 'utci' && (
+                      <UtciExplorer
+                        data={epwData.data}
+                        onRemove={() => removeChart(chart.id)}
+                        gradients={allGradients}
+                        filter={globalFilter}
+                        unitSystem={unitSystem}
+                        heatmapTextColor={heatmapTextColor}
+                        theme={theme}
+                        setShowGradientModal={setShowGradientModal}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add Chart Buttons (at the bottom of scroll) */}
+          <div className="pt-12 pb-20">
+            <div className={`flex flex-col items-center gap-6 p-8 rounded-3xl border-2 border-dashed transition-colors ${theme === 'dark' ? 'bg-gray-800/30 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+              <div className="text-center">
+                <h4 className={`text-lg font-semibold mb-1 ${theme === 'dark' ? 'text-gray-200' : 'text-gray-700'}`}>Add More Analysis</h4>
+                <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Expand your dashboard with additional visualizations</p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-6">
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => addChart('sunpath')}
+                    className={`w-16 h-16 flex items-center justify-center rounded-2xl transition-all hover:scale-110 shadow-md border-2 ${
+                      theme === 'dark' 
+                        ? 'bg-amber-900/20 border-amber-800 text-amber-400 hover:bg-amber-900/40' 
+                        : 'bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100'
+                    }`}
+                    title="Add Sun Path"
+                  >
+                    <Sun className="w-8 h-8" />
+                  </button>
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Sun Path</span>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => addChart('explorer')}
+                    className={`w-16 h-16 flex items-center justify-center rounded-2xl transition-all hover:scale-110 shadow-md border-2 ${
+                      theme === 'dark' 
+                        ? 'bg-blue-900/20 border-blue-800 text-blue-400 hover:bg-blue-900/40' 
+                        : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                    }`}
+                    title="Add Data Explorer"
+                  >
+                    <BarChart2 className="w-8 h-8" />
+                  </button>
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Explorer</span>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => addChart('wind')}
+                    className={`w-16 h-16 flex items-center justify-center rounded-2xl transition-all hover:scale-110 shadow-md border-2 ${
+                      theme === 'dark' 
+                        ? 'bg-teal-900/20 border-teal-800 text-teal-400 hover:bg-teal-900/40' 
+                        : 'bg-teal-50 border-teal-200 text-teal-600 hover:bg-teal-100'
+                    }`}
+                    title="Add Wind Explorer"
+                  >
+                    <Wind className="w-8 h-8" />
+                  </button>
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Wind Rose</span>
+                </div>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => addChart('utci')}
+                    className={`w-16 h-16 flex items-center justify-center rounded-2xl transition-all hover:scale-110 shadow-md border-2 ${
+                      theme === 'dark' 
+                        ? 'bg-orange-900/20 border-orange-800 text-orange-400 hover:bg-orange-900/40' 
+                        : 'bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100'
+                    }`}
+                    title="Add UTCI Comfort"
+                  >
+                    <ThermometerSun className="w-8 h-8" />
+                  </button>
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">UTCI</span>
                 </div>
               </div>
-            ))}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

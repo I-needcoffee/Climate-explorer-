@@ -13,9 +13,17 @@ interface InteractiveLegendProps {
   gradientId: string;
   setGradientId: (id: string) => void;
   gradients: GradientDef[];
+  fontScale?: number;
 }
 
-export function InteractiveLegend({ variable, gradientId, setGradientId, gradients }: InteractiveLegendProps) {
+export function InteractiveLegend({ 
+  variable, 
+  gradientId, 
+  setGradientId, 
+  gradients, 
+  theme = 'light',
+  fontScale = 1
+}: InteractiveLegendProps & { theme?: 'light' | 'dark' }) {
   const gradientDef = gradients.find(g => g.id === gradientId) || gradients[0];
   
   // Create a continuous color scale for the legend ticks
@@ -26,21 +34,15 @@ export function InteractiveLegend({ variable, gradientId, setGradientId, gradien
   const ticks = d3.ticks(variable.min, variable.max, 5);
 
   return (
-    <div className="bg-white p-3 rounded-xl border border-gray-200 flex flex-col gap-2 w-full shadow-sm">
+    <div 
+      className={`border flex flex-col w-full shadow-sm transition-colors ${theme === 'dark' ? 'bg-gray-800/50 border-gray-800' : 'bg-white border-gray-200'}`}
+      style={{ padding: `${12 * fontScale}px`, gap: `${8 * fontScale}px`, borderRadius: `${12 * fontScale}px` }}
+    >
       <div className="flex justify-between items-center px-1">
-        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">{variable.name} ({variable.unit})</span>
-        <select
-          value={gradientId}
-          onChange={(e) => setGradientId(e.target.value)}
-          className="text-xs bg-gray-50 border border-gray-200 rounded-md px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none cursor-pointer hover:bg-gray-100 transition-colors"
-        >
-          {gradients.map(g => (
-            <option key={g.id} value={g.id}>{g.name}</option>
-          ))}
-        </select>
+        <span className={`font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`} style={{ fontSize: `${12 * fontScale}px` }}>{variable.name} ({variable.unit})</span>
       </div>
       
-      <div className="relative h-3 w-full rounded-full overflow-hidden flex border border-gray-200">
+      <div className={`relative w-full rounded-full overflow-hidden flex border ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`} style={{ height: `${12 * fontScale}px` }}>
         {gradientDef.colors.map((c, i) => (
           <div key={i} className="flex-1 h-full" style={{ backgroundColor: c }} />
         ))}
@@ -48,7 +50,7 @@ export function InteractiveLegend({ variable, gradientId, setGradientId, gradien
       
       <div className="flex justify-between px-1">
         {ticks.map((t, i) => (
-          <span key={i} className="text-[10px] text-gray-500 font-medium">
+          <span key={i} className={`font-medium ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: `${10 * fontScale}px` }}>
             {t.toFixed(0)}
           </span>
         ))}

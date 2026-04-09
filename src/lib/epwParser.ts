@@ -67,14 +67,27 @@ export interface ParsedEPW {
 }
 
 export function parseEPW(csvString: string): ParsedEPW {
-  const lines = csvString.split('\n');
-  if (lines.length < 9) throw new Error("Invalid EPW file format");
+  // Remove BOM if present and split into lines
+  const cleanString = csvString.replace(/^\uFEFF/, '');
+  const lines = cleanString.split(/\r?\n/).map(l => l.trim());
+  
+  // Find the LOCATION line
+  let locationLineIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('LOCATION,')) {
+      locationLineIndex = i;
+      break;
+    }
+  }
 
-  // Parse Header (Line 1)
+  if (locationLineIndex === -1) {
+    throw new Error("Invalid EPW file: Missing LOCATION header");
+  }
+
+  // Parse Header (LOCATION line)
   // LOCATION,City,State,Country,Source,WMO,Lat,Lon,TimeZone,Elevation
-  const headerParts = lines[0].split(',');
-  if (headerParts[0] !== 'LOCATION') throw new Error("Invalid EPW file: Missing LOCATION header");
-
+  const headerParts = lines[locationLineIndex].split(',');
+  
   const metadata: EPWMetadata = {
     city: headerParts[1]?.trim() || 'Unknown',
     state: headerParts[2]?.trim() || '',
@@ -94,13 +107,18 @@ export function parseEPW(csvString: string): ParsedEPW {
     varMinMax[col.id] = { min: Infinity, max: -Infinity };
   });
 
-  // Parse Data (Line 9 onwards)
-  for (let i = 8; i < lines.length; i++) {
-    const line = lines[i].trim();
+  // Parse Data (usually starts 8 lines after LOCATION, but let's be safe and look for the first line that looks like data)
+  // Data lines start with Year, Month, Day, Hour... (all numbers)
+  for (let i = locationLineIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
     if (!line) continue;
     
     const parts = line.split(',');
-    if (parts.length < 35) continue;
+    // Data lines in EPW have many columns (usually 35+)
+    if (parts.length < 30) continue;
+    
+    // Check if the first few parts are numbers (Year, Month, Day, Hour)
+    if (isNaN(parseInt(parts[0], 10)) || isNaN(parseInt(parts[1], 10))) continue;
 
     const year = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10);

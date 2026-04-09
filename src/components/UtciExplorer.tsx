@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import * as d3 from 'd3';
+import Slider from 'rc-slider';
+import 'rc-slider/assets/index.css';
 import { EPWDataRow } from '../lib/epwParser';
 import tc from 'jsthermalcomfort';
 import { X, Settings2 } from 'lucide-react';
@@ -14,6 +16,9 @@ interface UtciExplorerProps {
   gradients: GradientDef[];
   filter: GlobalFilterState;
   unitSystem: UnitSystem;
+  heatmapTextColor: string;
+  theme: 'light' | 'dark';
+  setShowGradientModal: (show: boolean) => void;
 }
 
 const UTCI_COLORS: Record<string, string> = {
@@ -48,16 +53,39 @@ interface UtciDataRow extends EPWDataRow {
   isComfortable: number;
 }
 
-export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: UtciExplorerProps) {
+export function UtciExplorer({ 
+  data, onRemove, gradients, filter, unitSystem, heatmapTextColor, theme, 
+  setShowGradientModal
+}: UtciExplorerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [aggregation, setAggregation] = useState<'hour' | 'day' | 'week' | 'month'>('month');
-  const [aspectRatio, setAspectRatio] = useState('1/1');
   const [includeSun, setIncludeSun] = useState(true);
   const [includeWind, setIncludeWind] = useState(true);
   const [colorMode, setColorMode] = useState<'categories' | 'comfortTime' | 'gradient'>('categories');
   const [gradientId, setGradientId] = useState(gradients[0].id);
   const [showSettings, setShowSettings] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  const outerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 400 });
+
+  useEffect(() => {
+    if (!outerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        const newWidth = Math.round(entry.contentRect.width);
+        setDimensions(prev => {
+          if (prev.width === newWidth) return prev;
+          return { width: newWidth };
+        });
+      }
+    });
+    observer.observe(outerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = dimensions.width / 400;
 
   // Pre-calculate UTCI for all data points to avoid recalculating on every render/aggregation change
   const utciData: UtciDataRow[] = useMemo(() => {
@@ -87,17 +115,24 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
   const convertUtci = (val: number) => unitSystem === 'imperial' ? val * 9/5 + 32 : val;
   const utciUnit = unitSystem === 'imperial' ? '°F' : '°C';
 
-  useEffect(() => {
-    if (!svgRef.current || !utciData.length) return;
+  const { utciMin, utciMax } = useMemo(() => {
+    return {
+      utciMin: d3.min(utciData, d => d.utci) || -40,
+      utciMax: d3.max(utciData, d => d.utci) || 50
+    };
+  }, [utciData]);
 
-    const width = 900;
-    const [aspectW, aspectH] = aspectRatio.split('/').map(Number);
-    const height = width * (aspectH / aspectW);
+  useEffect(() => {
+    if (!svgRef.current || !utciData.length || dimensions.width === 0) return;
+
+    const BASE_WIDTH = 400;
+    const width = BASE_WIDTH;
+    const height = 500;
     
-    const margin = { top: 20, right: 40, bottom: 40, left: 60 };
+    const margin = { top: 15, right: 20, bottom: 25, left: 40 };
     
-    const barChartHeight = Math.max(150, height * 0.25);
-    const heatmapHeight = height - margin.top - margin.bottom - barChartHeight - 40;
+    const barChartHeight = Math.max(75, height * 0.25);
+    const heatmapHeight = height - margin.top - margin.bottom - barChartHeight - 20;
     
     const innerWidth = width - margin.left - margin.right;
 
@@ -115,8 +150,6 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
       .range(['#ffffff', '#22c55e']); // White to Green
 
     const gradientDef = gradients.find(g => g.id === gradientId) || gradients[0];
-    const utciMin = d3.min(utciData, d => d.utci) || -40;
-    const utciMax = d3.max(utciData, d => d.utci) || 50;
     const gradientColorScale = d3.scaleSequential()
       .domain([utciMin, utciMax])
       .interpolator(d3.interpolateRgbBasis(gradientDef.colors));
@@ -132,7 +165,7 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
 
     const yScaleHeatmap = d3.scaleLinear()
       .domain([0, 24])
-      .range([heatmapHeight, 0]);
+      .range([0, heatmapHeight]);
 
     // Aggregate data for heatmap
     let heatmapData: any[] = [];
@@ -208,13 +241,13 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
       .data(heatmapData)
       .join("g")
       .attr("class", "heatmap-cell-group")
-      .attr("transform", d => `translate(${xScale(d.x0)}, ${yScaleHeatmap(d.y + 1)})`);
+      .attr("transform", d => `translate(${xScale(d.x0)}, ${yScaleHeatmap(d.y)})`);
 
     cells.append("rect")
-      .attr("width", d => Math.max(1, xScale(d.x1) - xScale(d.x0) - 4)) // -4 for gap
-      .attr("height", cellHeight - 4) // -4 for gap
-      .attr("rx", 8) // Rounded corners
-      .attr("ry", 8)
+      .attr("width", d => Math.max(1, xScale(d.x1) - xScale(d.x0) - 1)) // -1 for gap
+      .attr("height", cellHeight - 1) // -1 for gap
+      .attr("rx", 2) // Smaller corner radius
+      .attr("ry", 2)
       .style("fill", d => {
         if (colorMode === 'categories') {
           return UTCI_COLORS[d.utciCategory] || '#cccccc';
@@ -239,28 +272,12 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
     // Overlay text for month and week aggregations if cells are large enough
     if (aggregation === 'month' || aggregation === 'week') {
       cells.append("text")
-        .attr("x", d => (xScale(d.x1) - xScale(d.x0)) / 2)
-        .attr("y", cellHeight / 2)
+        .attr("x", d => (xScale(d.x1) - xScale(d.x0)) / 2 - 0.5)
+        .attr("y", cellHeight / 2 - 0.5)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", d => {
-          // Use white or black text depending on background intensity
-          let colorStr = '#cccccc';
-          if (colorMode === 'categories') {
-            colorStr = UTCI_COLORS[d.utciCategory] || '#cccccc';
-          } else if (colorMode === 'gradient') {
-            colorStr = gradientColorScale(d.utci);
-          } else {
-            colorStr = comfortTimeColorScale(d.isComfortable);
-          }
-          const rgb = d3.color(colorStr)?.rgb();
-          if (rgb) {
-            const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-            return brightness > 80 ? "#000" : "#fff";
-          }
-          return "#000";
-        })
-        .style("font-size", aggregation === 'month' ? "14px" : "12px")
+        .style("fill", heatmapTextColor)
+        .style("font-size", aggregation === 'month' ? "10px" : "8px")
         .style("font-weight", "500")
         .style("pointer-events", "none")
         .style("opacity", d => {
@@ -285,27 +302,33 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
 
       heatmapG.append("rect")
         .attr("x", xScale(startDay))
-        .attr("y", yScaleHeatmap(filter.endHour + 1))
+        .attr("y", yScaleHeatmap(filter.startHour))
         .attr("width", xScale(endDay) - xScale(startDay))
-        .attr("height", yScaleHeatmap(filter.startHour) - yScaleHeatmap(filter.endHour + 1))
+        .attr("height", yScaleHeatmap(filter.endHour + 1) - yScaleHeatmap(filter.startHour))
         .attr("fill", "none")
         .attr("stroke", "#1f2937") // Dark grey
         .attr("stroke-width", 3)
-        .attr("rx", 8)
-        .attr("ry", 8)
+        .attr("rx", 2)
+        .attr("ry", 2)
         .style("pointer-events", "none");
     }
 
     // Y Axis for Heatmap
+    const formatHour = (h: number) => {
+      if (h === 0 || h === 24) return "12 AM";
+      if (h === 12) return "12 PM";
+      return h < 12 ? `${h} AM` : `${h - 12} PM`;
+    };
+
     const yAxisHeatmap = d3.axisLeft(yScaleHeatmap)
-      .tickValues([0, 6, 12, 18, 24])
-      .tickFormat(d => `${d}h`);
+      .tickValues(d3.range(0, 25, 1))
+      .tickFormat(d => formatHour(d as number));
     
     heatmapG.append("g")
       .call(yAxisHeatmap)
-      .call(g => g.select(".domain").style("stroke", "#4b5563").style("stroke-width", "2px"))
-      .call(g => g.selectAll(".tick line").attr("x2", innerWidth).style("stroke", "#4b5563").style("stroke-width", "1.5px").attr("stroke-opacity", 0.2))
-      .call(g => g.selectAll(".tick text").style("fill", "#4b5563").style("font-weight", "bold").style("font-size", "14px"));
+      .call(g => g.select(".domain").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", `2px`))
+      .call(g => g.selectAll(".tick line").attr("x2", innerWidth).style("stroke", theme === 'dark' ? '#374151' : '#e5e7eb').style("stroke-width", `1.5px`).attr("stroke-opacity", 0.5))
+      .call(g => g.selectAll(".tick text").style("fill", heatmapTextColor).style("font-weight", "bold").style("font-size", `8px`));
 
     // --- Bar Chart ---
     const barChartG = g.append("g");
@@ -470,8 +493,8 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
           .attr("x2", cx)
           .attr("y1", yScaleBar(d.maxSelected!))
           .attr("y2", yScaleBar(d.minSelected!))
-          .style("stroke", "#1f2937")
-          .style("stroke-width", "1.5px");
+          .style("stroke", heatmapTextColor)
+          .style("stroke-width", '1.5px');
 
         // Top bracket
         g.append("line")
@@ -479,8 +502,8 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
           .attr("x2", cx + whiskerW / 2)
           .attr("y1", yScaleBar(d.maxSelected!))
           .attr("y2", yScaleBar(d.maxSelected!))
-          .style("stroke", "#1f2937")
-          .style("stroke-width", "1.5px");
+          .style("stroke", heatmapTextColor)
+          .style("stroke-width", '1.5px');
 
         // Bottom bracket
         g.append("line")
@@ -488,8 +511,8 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
           .attr("x2", cx + whiskerW / 2)
           .attr("y1", yScaleBar(d.minSelected!))
           .attr("y2", yScaleBar(d.minSelected!))
-          .style("stroke", "#1f2937")
-          .style("stroke-width", "1.5px");
+          .style("stroke", heatmapTextColor)
+          .style("stroke-width", '1.5px');
       });
     }
 
@@ -499,9 +522,9 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
       
     barChartG.append("g")
       .call(yAxisBar)
-      .call(g => g.select(".domain").style("stroke", "#4b5563").style("stroke-width", "2px"))
-      .call(g => g.selectAll(".tick line").attr("x2", innerWidth).style("stroke", "#4b5563").style("stroke-width", "1.5px").attr("stroke-opacity", 0.2))
-      .call(g => g.selectAll(".tick text").style("fill", "#4b5563").style("font-weight", "bold").style("font-size", "13px"));
+      .call(g => g.select(".domain").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", '2px'))
+      .call(g => g.selectAll(".tick line").attr("x2", innerWidth).style("stroke", theme === 'dark' ? '#374151' : '#e5e7eb').style("stroke-width", '1.5px').attr("stroke-opacity", 0.5))
+      .call(g => g.selectAll(".tick text").style("fill", heatmapTextColor).style("font-weight", "bold").style("font-size", `10px`));
 
     // Zero line for UTCI values
     if (colorMode !== 'comfortTime') {
@@ -510,8 +533,8 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
         .attr("x2", innerWidth)
         .attr("y1", yScaleBar(0))
         .attr("y2", yScaleBar(0))
-        .attr("stroke", "#4b5563")
-        .attr("stroke-width", 2)
+        .attr("stroke", theme === 'dark' ? '#6b7280' : '#4b5563')
+        .attr("stroke-width", '2px')
         .attr("stroke-opacity", 0.5);
     }
 
@@ -519,21 +542,24 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const monthDays = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
 
-    const xAxis = d3.axisBottom(xScale)
+    const xAxis = d3.axisTop(xScale)
       .tickValues(monthDays)
       .tickFormat((_, i) => months[i]);
 
     heatmapG.append("g")
-      .attr("transform", `translate(0, ${heatmapHeight})`)
+      .attr("transform", `translate(0, 0)`)
       .call(xAxis)
-      .call(g => g.select(".domain").style("stroke", "#4b5563").style("stroke-width", "2px"))
-      .call(g => g.selectAll(".tick line").style("stroke", "#4b5563").style("stroke-width", "2px"))
-      .call(g => g.selectAll(".tick text").attr("x", (innerWidth / 12) / 2).style("fill", "#4b5563").style("font-weight", "bold").style("font-size", "13px"));
+      .call(g => g.select(".domain").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", '2px'))
+      .call(g => g.selectAll(".tick line").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", '2px'))
+      .call(g => g.selectAll(".tick text").attr("x", (innerWidth / 12) / 2).attr("dy", "-0.5em").style("fill", heatmapTextColor).style("font-weight", "bold").style("font-size", `10px`));
 
-  }, [utciData, aggregation, colorMode, gradientId, gradients, filter, aspectRatio, unitSystem]);
+    heatmapG.append("g")
+      .attr("transform", `translate(0, ${heatmapHeight})`)
+      .call(d3.axisBottom(xScale).tickValues(monthDays).tickFormat(""))
+      .call(g => g.select(".domain").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", '2px'))
+      .call(g => g.selectAll(".tick line").style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563').style("stroke-width", '2px'));
 
-  const utciMin = d3.min(utciData, d => d.utci) || -40;
-  const utciMax = d3.max(utciData, d => d.utci) || 50;
+  }, [utciData, aggregation, colorMode, gradientId, gradients, filter, dimensions.width, unitSystem, heatmapTextColor, theme, scale]);
 
   // Calculate local stats for filtered data
   const filteredData = utciData.filter(d => {
@@ -567,208 +593,274 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
   };
 
   return (
-    <div className="w-full bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-4 border-b border-gray-100 bg-white">
-        <div className="flex items-center justify-between w-full sm:w-auto gap-3">
-          <h3 className="text-sm font-semibold text-gray-800 whitespace-nowrap">UTCI Comfort</h3>
+    <div 
+      ref={outerRef}
+      className={`w-full h-fit flex flex-col relative transition-colors duration-300 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}
+      style={{ 
+        '--scale': scale,
+        fontSize: `calc(14px * ${scale})`
+      } as any}
+    >
+      <div 
+        className={`flex flex-col sm:flex-row justify-between items-start sm:items-center border-b ${theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white'}`}
+        style={{ padding: `calc(16px * ${scale})`, gap: `calc(12px * ${scale})` }}
+      >
+        <div className="flex items-center justify-between w-full sm:w-auto" style={{ gap: `calc(12px * ${scale})` }}>
+          <div className="flex items-center min-w-0" style={{ gap: `calc(12px * ${scale})` }}>
+            <h3 
+              className={`font-semibold whitespace-nowrap uppercase tracking-wider ${theme === 'dark' ? 'text-gray-200' : 'text-gray-800'}`}
+              style={{ fontSize: `calc(14px * ${scale})` }}
+            >
+              UTCI Comfort
+            </h3>
+          </div>
+          {onRemove && (
+            <button 
+              onClick={onRemove} 
+              className={`sm:hidden rounded-md transition-colors ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/30' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+              style={{ padding: `calc(6px * ${scale})` }}
+            >
+              <X style={{ width: `calc(16px * ${scale})`, height: `calc(16px * ${scale})` }} />
+            </button>
+          )}
         </div>
         
-        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          <div className="flex bg-gray-100 p-1 rounded-lg">
+        <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto" style={{ gap: `calc(12px * ${scale})` }}>
+          <div className={`flex rounded-lg ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`} style={{ padding: `calc(4px * ${scale})` }}>
             {(['hour', 'day', 'week', 'month'] as const).map(agg => (
               <button
                 key={agg}
                 onClick={() => setAggregation(agg)}
-                className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
-                  aggregation === agg ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'
+                className={`rounded-md font-medium capitalize transition-colors ${
+                  aggregation === agg 
+                    ? (theme === 'dark' ? 'bg-gray-600 shadow-sm text-blue-400' : 'bg-white shadow-sm text-blue-600')
+                    : (theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700')
                 }`}
+                style={{ 
+                  padding: `calc(4px * ${scale}) calc(12px * ${scale})`,
+                  fontSize: `calc(12px * ${scale})`
+                }}
               >
                 {agg}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setShowStats(!showStats)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  showStats ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'
-                }`}
-                title="Toggle Statistics"
-              >
-                Stats
-              </button>
-            </div>
+          <div className="flex items-center" style={{ gap: `calc(8px * ${scale})` }}>
+            <button
+              onClick={() => setShowStats(!showStats)}
+              className={`rounded-md font-medium transition-colors border ${
+                showStats 
+                  ? (theme === 'dark' ? 'bg-blue-900/50 border-blue-800 text-blue-400' : 'bg-blue-50 border-blue-100 text-blue-600') 
+                  : (theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200' : 'bg-white border-gray-200 text-gray-500 hover:text-gray-700')
+              }`}
+              style={{ 
+                padding: `calc(4px * ${scale}) calc(12px * ${scale})`,
+                fontSize: `calc(12px * ${scale})`
+              }}
+              title="Toggle Statistics"
+            >
+              Stats
+            </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-1.5 rounded-md transition-colors ${showSettings ? 'bg-blue-50 text-blue-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}
+              className={`rounded-md transition-colors border ${
+                showSettings 
+                  ? (theme === 'dark' ? 'bg-blue-900/50 border-blue-800 text-blue-400' : 'bg-blue-50 border-blue-100 text-blue-600') 
+                  : (theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600')
+              }`}
+              style={{ padding: `calc(6px * ${scale})` }}
               title="Chart Settings"
             >
-              <Settings2 className="w-4 h-4" />
+              <Settings2 style={{ width: `calc(16px * ${scale})`, height: `calc(16px * ${scale})` }} />
             </button>
             {onRemove && (
-              <button onClick={onRemove} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors ml-1">
-                <X className="w-4 h-4" />
+              <button 
+                onClick={onRemove} 
+                className={`hidden sm:block rounded-md transition-colors ${theme === 'dark' ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/30' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                style={{ padding: `calc(6px * ${scale})` }}
+              >
+                <X style={{ width: `calc(16px * ${scale})`, height: `calc(16px * ${scale})` }} />
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Stats Bar */}
+      {/* Stats Modal */}
       {showStats && (
-        <div className="px-4 py-3 bg-white border-b border-gray-50 flex flex-col gap-4">
-          <div className="flex flex-wrap gap-6 text-sm">
-            <div className="flex flex-col">
-              <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Average UTCI</span>
-              <span className="font-medium text-gray-900 text-base">{stats.avg.toFixed(1)}{utciUnit}</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowStats(false)}>
+          <div className={`p-6 rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto ${theme === 'dark' ? 'bg-gray-800 border border-gray-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Comfort Statistics</h3>
+              <button onClick={() => setShowStats(false)} className={`p-1 rounded-md ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}>
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="w-px h-8 bg-gray-100"></div>
-            <div className="flex flex-col">
-              <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Min / Max</span>
-              <span className="font-medium text-gray-900 text-base">{stats.min.toFixed(1)} / {stats.max.toFixed(1)}{utciUnit}</span>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average UTCI</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {utciUnit}</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Comfort Ratio</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`}>{(stats.comfortRatio * 100).toFixed(1)}%</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+                <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {utciUnit}</div>
+              </div>
+              <div className={`p-4 rounded-lg ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+                <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+                <div className={`text-xl font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+              </div>
             </div>
-            <div className="w-px h-8 bg-gray-100"></div>
-            <div className="flex flex-col">
-              <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Comfort Time</span>
-              <span className="font-medium text-green-600 text-base">{(stats.comfortRatio * 100).toFixed(1)}%</span>
-            </div>
-            <div className="w-px h-8 bg-gray-100"></div>
-            <div className="flex flex-col">
-              <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px] mb-1">Samples</span>
-              <span className="font-medium text-gray-900 text-base">{stats.count}</span>
-            </div>
-          </div>
 
-          {/* Category Distribution Bar */}
-          <div className="flex flex-col gap-2">
-            <span className="text-gray-500 font-semibold uppercase tracking-wider text-[10px]">Stress Category Distribution</span>
-            <div className="h-4 w-full bg-gray-100 rounded-full overflow-hidden flex">
-              {stats.categoryPercentages.map((cp, i) => (
-                <div 
-                  key={i}
-                  style={{ width: `${cp.percentage}%`, backgroundColor: cp.color }}
-                  className="h-full transition-all duration-500"
-                  title={`${cp.category}: ${cp.percentage.toFixed(1)}%`}
-                />
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {stats.categoryPercentages.map((cp, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cp.color }} />
-                  <span className="text-[10px] text-gray-600 capitalize">
-                    {cp.category}: <span className="font-semibold">{cp.percentage.toFixed(1)}%</span>
-                  </span>
-                </div>
-              ))}
+            <div className="space-y-3">
+              <h4 className={`text-sm font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Stress Category Breakdown</h4>
+              <div className="space-y-2">
+                {stats.categoryPercentages.map(cat => (
+                  <div key={cat.category} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className={`capitalize ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>{cat.category}</span>
+                      <span className={`font-medium ${theme === 'dark' ? 'text-gray-200' : 'text-gray-900'}`}>{cat.percentage.toFixed(1)}%</span>
+                    </div>
+                    <div className={`h-1.5 w-full rounded-full ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <div 
+                        className="h-full rounded-full" 
+                        style={{ backgroundColor: UTCI_COLORS[cat.category], width: `${cat.percentage}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Settings Modal */}
       {showSettings && (
-        <div className="p-4 bg-white border-b border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Color Mode</label>
-            <div className="flex bg-gray-50 border border-gray-200 p-1 rounded-lg">
-              <button
-                onClick={() => setColorMode('categories')}
-                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                  colorMode === 'categories' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Categories
-              </button>
-              <button
-                onClick={() => setColorMode('gradient')}
-                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                  colorMode === 'gradient' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Gradient
-              </button>
-              <button
-                onClick={() => setColorMode('comfortTime')}
-                className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                  colorMode === 'comfortTime' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Comfort
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettings(false)}>
+          <div className={`p-6 rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto ${theme === 'dark' ? 'bg-gray-800 border border-gray-700' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className={`text-lg font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>UTCI Chart Settings</h3>
+              <button onClick={() => setShowSettings(false)} className={`p-1 rounded-md ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}>
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Include Factors</label>
-            <div className="flex gap-6 pt-2">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input 
-                  type="checkbox" 
-                  checked={includeSun} 
-                  onChange={e => setIncludeSun(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 transition-all"
-                />
-                <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Sun</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input 
-                  type="checkbox" 
-                  checked={includeWind} 
-                  onChange={e => setIncludeWind(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 transition-all"
-                />
-                <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Wind</span>
-              </label>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Aspect Ratio</label>
-            <select
-              value={aspectRatio}
-              onChange={(e) => setAspectRatio(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 transition-all hover:bg-white"
-            >
-              <option value="1/1">1:1 (Square)</option>
-              <option value="4/3">4:3 (Standard)</option>
-              <option value="3/2">3:2 (Classic)</option>
-              <option value="2/3">2:3 (Tall)</option>
-              <option value="2/1">2:1 (Wide)</option>
-              <option value="3/1">3:1 (Ultrawide)</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Color Palette</label>
-            <div className="flex bg-gray-50 border border-gray-200 p-1.5 rounded-lg overflow-x-auto">
-              {gradients.map(g => (
-                <button
-                  key={g.id}
-                  onClick={() => setGradientId(g.id)}
-                  className={`flex-shrink-0 w-8 h-8 rounded-md mx-1 border-2 transition-all ${
-                    gradientId === g.id ? 'border-blue-500 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
-                  }`}
-                  style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
-                  title={g.name}
-                />
-              ))}
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Calculation Inputs</label>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={includeSun} 
+                        onChange={e => setIncludeSun(e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className={`text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Include Solar Radiation</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={includeWind} 
+                        onChange={e => setIncludeWind(e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className={`text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Include Wind Speed</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Visualization Mode</label>
+                  <select 
+                    value={colorMode} 
+                    onChange={e => setColorMode(e.target.value as any)}
+                    className={`w-full p-2 rounded-md border text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${
+                      theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  >
+                    <option value="categories">Stress Categories</option>
+                    <option value="comfortTime">Comfort Ratio</option>
+                    <option value="gradient">Temperature Gradient</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Time Aggregation</label>
+                  <select 
+                    value={aggregation} 
+                    onChange={e => setAggregation(e.target.value as any)}
+                    className={`w-full p-2 rounded-md border text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${
+                      theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  >
+                    <option value="hour">Hourly</option>
+                    <option value="day">Daily</option>
+                    <option value="week">Weekly</option>
+                    <option value="month">Monthly</option>
+                  </select>
+                </div>
+
+                {colorMode === 'gradient' && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
+                      <button 
+                        onClick={() => setShowGradientModal(true)}
+                        className="text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-tight"
+                      >
+                        + Create
+                      </button>
+                    </div>
+                    <div className={`flex p-1.5 rounded-lg overflow-x-auto border ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+                      {gradients.map(g => (
+                        <button
+                          key={g.id}
+                          onClick={() => setGradientId(g.id)}
+                          className={`flex-shrink-0 w-8 h-8 rounded-md mx-1 border-2 transition-all ${
+                            gradientId === g.id ? 'border-blue-500 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                          }`}
+                          style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
+                          title={g.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="p-4 flex-1 flex flex-col">
-        <div className="w-full" style={{ aspectRatio: aspectRatio }}>
+      <div style={{ padding: `calc(16px * ${scale})` }} className="flex-1 flex flex-col">
+        <div 
+          className="w-full" 
+          ref={containerRef}
+          style={{ height: `calc(500px * ${scale})` }}
+        >
           <svg ref={svgRef} className="w-full h-full" />
         </div>
         
         {/* Custom Legend for UTCI */}
-        <div className="mt-4">
+        <div style={{ marginTop: `calc(16px * ${scale})` }} className="flex-shrink-0">
           {colorMode === 'categories' ? (
-            <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
-              <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">UTCI Categories</h4>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <div 
+              className={`border shadow-sm ${theme === 'dark' ? 'bg-gray-800/50 border-gray-700' : 'bg-white border-gray-200'}`}
+              style={{ padding: `${12 * scale}px`, borderRadius: `${12 * scale}px` }}
+            >
+              <h4 className={`font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`} style={{ fontSize: `${12 * scale}px`, marginBottom: `${8 * scale}px` }}>UTCI Categories</h4>
+              <div className="flex flex-wrap" style={{ gap: `${16 * scale}px ${8 * scale}px` }}>
                 {Object.entries(UTCI_COLORS).map(([category, color]) => (
-                  <div key={category} className="flex items-center gap-1.5 text-xs text-gray-600">
-                    <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }}></div>
+                  <div key={category} className={`flex items-center ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`} style={{ gap: `${6 * scale}px`, fontSize: `${12 * scale}px` }}>
+                    <div className="rounded-sm" style={{ backgroundColor: color, width: `${12 * scale}px`, height: `${12 * scale}px` }}></div>
                     <span className="capitalize">{category.replace(' stress', '')}</span>
                   </div>
                 ))}
@@ -780,14 +872,19 @@ export function UtciExplorer({ data, onRemove, gradients, filter, unitSystem }: 
               gradientId={gradientId} 
               setGradientId={setGradientId} 
               gradients={gradients}
+              theme={theme}
+              fontScale={scale}
             />
           ) : (
-            <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
-              <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Time in Comfort Zone</h4>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500 font-medium">0%</span>
-                <div className="h-3 flex-1 rounded-full" style={{ background: 'linear-gradient(to right, #ffffff, #22c55e)', border: '1px solid #e5e7eb' }}></div>
-                <span className="text-xs text-gray-500 font-medium">100%</span>
+            <div 
+              className={`border shadow-sm ${theme === 'dark' ? 'bg-gray-800/50 border-gray-700' : 'bg-white border-gray-200'}`}
+              style={{ padding: `${12 * scale}px`, borderRadius: `${12 * scale}px` }}
+            >
+              <h4 className={`font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`} style={{ fontSize: `${12 * scale}px`, marginBottom: `${8 * scale}px` }}>Time in Comfort Zone</h4>
+              <div className="flex items-center" style={{ gap: `${12 * scale}px` }}>
+                <span className={`font-medium ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`} style={{ fontSize: `${12 * scale}px` }}>0%</span>
+                <div className={`flex-1 rounded-full border ${theme === 'dark' ? 'border-gray-600' : 'border-gray-200'}`} style={{ background: 'linear-gradient(to right, #ffffff, #22c55e)', height: `${12 * scale}px` }}></div>
+                <span className={`font-medium ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`} style={{ fontSize: `${12 * scale}px` }}>100%</span>
               </div>
             </div>
           )}

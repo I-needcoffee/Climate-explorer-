@@ -10,9 +10,10 @@ interface SummaryStatsProps {
   variables: EPWVariable[];
   filter: GlobalFilterState;
   unitSystem: UnitSystem;
+  theme: 'light' | 'dark';
 }
 
-export function SummaryStats({ data, variables, filter, unitSystem }: SummaryStatsProps) {
+export function SummaryStats({ data, variables, filter, unitSystem, theme }: SummaryStatsProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
   // Filter data based on the global filter
   const filteredData = data.filter(d => {
@@ -86,54 +87,45 @@ export function SummaryStats({ data, variables, filter, unitSystem }: SummarySta
   const comfortPercent = utciCount > 0 ? (comfortHours / utciCount) * 100 : 0;
 
   return (
-    <div className="bg-white border-b border-gray-200 z-10 shadow-sm text-sm rounded-b-2xl mx-4 mb-4 overflow-hidden border-x border-t">
-      <div className="px-4 py-2 flex items-center justify-between bg-white cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setIsCollapsed(!isCollapsed)}>
-        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Primary Averages</span>
-        {isCollapsed ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />}
+    <div className={`flex flex-wrap border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-100'}`} style={{ padding: '16px', gap: '32px' }}>
+      <div className="flex flex-col">
+        <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Avg Temp</span>
+        <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{avgTemp.toFixed(1)}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
       </div>
-      
-      {!isCollapsed && (
-        <div className="px-4 py-4 flex flex-wrap gap-8 border-t border-gray-100">
+      <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
+      <div className="flex flex-col">
+        <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Avg Humidity</span>
+        <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{avgRh.toFixed(0)}%</span>
+      </div>
+      <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
+      <div className="flex flex-col">
+        <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Avg Wind</span>
+        <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{avgWind.toFixed(1)} {unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
+      </div>
+      <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
+      <div className="flex flex-col">
+        <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Total Rainfall</span>
+        <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{totalRain.toFixed(unitSystem === 'imperial' ? 2 : 0)} {unitSystem === 'imperial' ? 'in' : 'mm'}</span>
+      </div>
+      {utciCount > 0 && (
+        <>
+          <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
           <div className="flex flex-col">
-            <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Avg Temp</span>
-            <span className="font-medium text-gray-900 text-lg">{avgTemp.toFixed(1)}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
+            <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Avg UTCI</span>
+            <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{avgUtci.toFixed(1)}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
           </div>
-          <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
+          <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
           <div className="flex flex-col">
-            <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Avg Humidity</span>
-            <span className="font-medium text-gray-900 text-lg">{avgRh.toFixed(0)}%</span>
+            <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Comfort Time</span>
+            <span className={`font-medium ${theme === 'dark' ? 'text-green-400' : 'text-green-600'}`} style={{ fontSize: '18px' }}>{comfortPercent.toFixed(1)}%</span>
           </div>
-          <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Avg Wind</span>
-            <span className="font-medium text-gray-900 text-lg">{avgWind.toFixed(1)} {unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
-          </div>
-          <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Total Rainfall</span>
-            <span className="font-medium text-gray-900 text-lg">{totalRain.toFixed(unitSystem === 'imperial' ? 2 : 0)} {unitSystem === 'imperial' ? 'in' : 'mm'}</span>
-          </div>
-          {utciCount > 0 && (
-            <>
-              <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
-              <div className="flex flex-col">
-                <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Avg UTCI</span>
-                <span className="font-medium text-gray-900 text-lg">{avgUtci.toFixed(1)}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
-              </div>
-              <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
-              <div className="flex flex-col">
-                <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Comfort Time</span>
-                <span className="font-medium text-green-600 text-lg">{comfortPercent.toFixed(1)}%</span>
-              </div>
-            </>
-          )}
-          <div className="w-px h-10 bg-gray-200 hidden sm:block"></div>
-          <div className="flex flex-col">
-            <span className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1">Selected Hours</span>
-            <span className="font-medium text-gray-900 text-lg">{count}</span>
-          </div>
-        </div>
+        </>
       )}
+      <div className={`w-px hidden sm:block ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`} style={{ height: '40px' }}></div>
+      <div className="flex flex-col">
+        <span className={`font-semibold uppercase tracking-wider mb-1 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} style={{ fontSize: '10px' }}>Selected Hours</span>
+        <span className={`font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`} style={{ fontSize: '18px' }}>{count}</span>
+      </div>
     </div>
   );
 }
